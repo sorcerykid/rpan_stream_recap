@@ -1,10 +1,10 @@
 #!/bin/awk -f
 BEGIN {
-	print( "-------------------------------------------------" );
-	print( " RPAN Stream Recap v1.0" );
-	print( " By Leslie E. Krause" );
-	print( " https://github.com/sorcerykid/rpan_stream_recap" );
-	print( "-------------------------------------------------" );
+	print "-------------------------------------------------";
+	print " RPAN Stream Recap v1.0";
+	print " By Leslie E. Krause";
+	print " https://github.com/sorcerykid/rpan_stream_recap";
+	print "-------------------------------------------------";
 	print_log( "Process started for " ARGV[ 1 ] );
 
 	NIL = "";
@@ -12,7 +12,7 @@ BEGIN {
 
 	load_config( );
 	if( YOUTUBE_DL == NIL || TARGET_FILENAME == NIL || TARGET_PATH == NIL || MAX_BITRATE == NIL || TIMEZONE_OFFSET == NIL ) {
-		print( "Missing configuration settings, aborting!" );
+		print "Missing configuration settings, aborting!";
 		exit( 1 );
 	}
 }

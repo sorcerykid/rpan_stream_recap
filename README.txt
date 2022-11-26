@@ -18,6 +18,10 @@ homepage or from the GitHub repository:
   https://yt-dl.org/
   https://github.com/ytdl-org/youtube-dl
 
+I also recommend ffmpeg for post-processing of videos. It is available here:
+
+  https://ffmpeg.org/
+
 Before running the script for the first time, you should open 'config.awk' and change
 the configuration settings below. Any lines beginning with '#' will be ignored.
 
@@ -27,13 +31,13 @@ the configuration settings below. Any lines beginning with '#' will be ignored.
   * TARGET_PATH
     This is the target path where videos are to be stored. Be sure there is sufficient 
     free space on the filesystem (one hour of content requires ~1.0 GB of storage). If
-    a backup path is specified, then this location will serve as a staging place.
+    a backup path is specified, then the target path will serve as a staging area.
 
   * BACKUP_PATH (optional)
     This is the backup path where videos will be uploaded. For ordinary file transfers 
     over SSH or SFTP, rsync will be used. However, by prepending 'remote:' to the backup 
     path, rclone will be used instead (as required by many cloud hosts). Once the file 
-    transfer is completed, the video will be removed from the target path.
+    transfer is completed, the video will be removed from the staging area.
 
   * MAX_BITRATE
     This controls the bandwidth throttling for captures. I found 5 MB/s to be the most
@@ -81,7 +85,18 @@ Note: You must set the execute permissions for 'recap.awk'.
 All output from the script, including that of youtube-dl, will be logged to 'debug.txt'.
 If the file doesn't already exist, it will be created.
 
-Please consider supporting my work, if you find RPAN Stream Recap useful:
+Occasionally, missing fragments may be encountered. These warnings are often temporary
+and can be overcome by retrying the capture from scratch. If the same fragment(s) fail, 
+on a subsequent attempt, then that is typically indicative of an interruption during the
+original broadcast (i.e. a connection drop).
+
+Be aware that the video will likely be unplayable due audio synchronization issues. This
+can be fixed by remuxing the audio and video tracks without re-encoding. The following 
+command should solve the problem:
+
+  % ffmpeg -y -i input.mp4 -c copy -f mp4 "-bsf:a" aac_adtstoasc output.mp4
+
+If you find this project useful, then please consider supporting my work:
 
   https://givebutter.com/sorcerykid
 
