@@ -1,0 +1,257 @@
+<html>
+<!--
+  RPAN Stream Recap for Windows v1.0
+  Copyright(c) 2022, Leslie E. Krause
+
+  Licensed under The MIT License.
+  https://opensource.org/licenses/MIT
+-->
+
+<head>
+<meta http-equiv="x-ua-compatible" content="ie=11" />
+<title>RPAN Stream Recap</title>
+<HTA:APPLICATION ID="rpan_stream_recap"
+	APPLICATIONNAME="RPAN Stream Recap"
+	BORDER="thin"
+	BORDERSTYLE="normal"
+	CAPTION="yes"
+	ICON=""
+	MAXIMIZEBUTTON="no"
+	MINIMIZEBUTTON="yes"
+	SHOWINTASKBAR="yes"
+	SINGLEINSTANCE="yes"
+	SYSMENU="yes"
+	VERSION="1.0"
+	WINDOWSTATE="normal" />
+
+<script>
+var YOUTUBE_DL;
+var TARGET_FILENAME;
+var TIMEZONE_OFFSET;
+var BACKUP_PATH;
+var TARGET_PATH;
+var MAX_BITRATE;
+var SLEEP_PERIOD;
+</script>
+<script src="config.js"></script>
+<script src="lib/format.js"></script>
+<script src="lib/async.js"></script>
+<script src="lib/debug.js"></script>
+<script src="lib/template.js"></script>
+
+<script>
+const wsh_shell = new ActiveXObject( 'Wscript.Shell' );
+const app_shell = new ActiveXObject( 'Shell.Application' );
+const fs = new ActiveXObject( 'Scripting.FileSystemObject' );
+const FS_READ = 1;
+const FS_WRITE = 2;
+const FS_APPEND = 8;
+
+var history = [ ];
+var debug;
+
+function toTimestamp( str )
+{
+	return Math.floor( new Date( str ).getTime( ) / 1000 );
+}
+
+function fromTimestamp( t )
+{
+	return strftime( "%d-%b-%Y", t, TIMEZONE_OFFSET );
+}
+
+function convertTimestamp( t )
+{
+	let epoch = 25569.0;  // VB dates are based on days since December 30, 1899
+	return epoch + ( t + TIMEZONE_OFFSET * 3600 ) / 86400;
+}
+
+function getFilespec( v )
+{
+	let res = TARGET_FILENAME;
+	res = res.replace( /%STREAM_ID%/g, v.stream_id );
+	res = res.replace( /%SUBREDDIT%/g, v.subreddit.slice( 2 ) );
+	res = res.replace( /%POST_TITLE_PC%/g, v.post_title.replace( /[^A-Za-z0-9.,-_]/g, '' ) );
+	res = res.replace( /%POST_TITLE_SC%/g, v.post_title.toLowerCase( ).replace( /[^a-z0-9().,-_]/g, '_' ) );
+	res = res.replace( /%POST_TITLE_KC%/g, v.post_title.toLowerCase( ).replace( /[^a-z0-9().,-_]/g, '-' ) );
+	res = res.replace( /%POST_TITLE_TC%/g, v.post_title.replace( /[^A-Za-z0-9().,-_]/g, '-' ) );
+	res = res.replace( /%POST_DATE1%/g, strftime( "%Y-%m-%d", v.post_created, TIMEZONE_OFFSET ) );
+	res = res.replace( /%POST_DATE2%/g, strftime( "%d-%b-%Y", v.post_created, TIMEZONE_OFFSET ) );
+	res = res.replace( /%POST_DATE3%/g, strftime( "%m-%d-%Y", v.post_created, TIMEZONE_OFFSET ) );
+	return res;
+}
+	
+function captureStream( filespec, v )
+{
+	let xfer_ratio = 0;
+	let frag_count = 0;
+	let frag_total = 0;
+	let ctime = Date.now( ) / 1000;
+	
+	debug.print_status( sprintf( 'Capturing stream "%s" from "%s/%s"...',
+		v.post_title, v.subreddit, v.stream_id ), true );
+	
+	let cmd = sprintf( '%s -r %s -o "%s" --newline --hls-prefer-native https://www.reddit.com/rpan/%s/%s',
+		YOUTUBE_DL, MAX_BITRATE, TARGET_PATH + '\\' + filespec, v.subreddit, v.stream_id );
+	let exec = wsh_shell.Exec( cmd );
+	if( exec.ProcessID == 0 && exec.Status == 1 ) {
+		debug.print_status( 'Unknown error launching youtube-dl!', true );
+		return;
+	}
+	
+	window.setTimeout( function ( ) {
+		wsh_shell.AppActivate( 'RPAN Stream Recap' );  // restore focus to this application
+	}, 500 );
+	
+	asyncLoop( function ( ) {
+		if( exec.Status != 0 ) {
+			let dtime = Date.now( ) / 1000 - ctime;
+			debug.print_status( sprintf( "Capture completed (%d min %d sec).",
+                Math.floor( dtime / 60 ), dtime % 60 ), true );
+			if( frag_count > 0 ) {
+				alert( frag_count + ' missing fragments. Check debug log for details.' );
+			}
+			return false;
+		}
+
+		let is_logged = true;
+		let line = exec.StdOut.ReadLine( );
+		
+		if( is_match( line, /^\[hlsnative\] Total fragments: (.+)/ ) ) {
+			frag_total = parseInt( _C[ 1 ] )
+			output3.update( frag_total, frag_count );
+		}
+		else if( is_match( line, /^\[download\] Destination: (.+)/ ) ) {
+			output1.update( _C[ 1 ] );
+		}
+		else if( is_match( line, /^\[download\] +([0-9]+\.[0-9])%/ ) ) {
+			xfer_ratio = Math.max( parseInt( _C[ 1 ] ), xfer_ratio );
+			progress.set( xfer_ratio );
+			output2.update( xfer_ratio );
+			is_logged = false;
+		}
+		else if( is_match( line, /^\[download\] Skipping fragment [0-9]+.../ ) ) {
+			frag_count++;
+			output3.update( frag_total, frag_count );
+		}
+		
+		debug.print_status( line, is_logged );
+		return true;
+	} );
+}
+
+function computeFileChecksum( filespec )
+{
+	debug.print_status( sprintf( 'Calculating checksum of "%s"...', filespec ), true );
+	
+	let cmd = sprintf( 'certutil -hashfile %s MD5', TARGET_PATH + '\\' + filespec );
+	let exec = wsh_shell.Exec( cmd );
+	if( exec.ProcessID == 0 && exec.Status == 1 ) {
+		debug.print_status( 'Unknown error launching certutil!', true );
+		return;
+	}
+	
+	window.setTimeout( function ( ) {
+		wsh_shell.AppActivate( 'RPAN Stream Recap' );  // restore focus to this application
+	}, 500 );
+	
+	let lines = exec.StdOut.ReadAll( ).split( '\r\n' );
+	debug.print_status( "MD5: " + lines[ 1 ], true );
+}
+
+function updateFileTimestamp( filespec, v )
+{
+	let file = fs.GetFile( TARGET_PATH + '\\' + filespec );
+	let path = file.ParentFolder.Path;
+	let item = app_shell.NameSpace( path ).ParseName( filespec );
+	
+//	item.ModifyDate = strftime( "%m/%d/%Y %H:%M:%S", v.post_created, TIMEZONE_OFFSET );
+	item.ModifyDate = convertTimestamp( v.post_created );
+
+	debug.print_status( sprintf( 'Changed timestamp of "%s" to %s.',
+		filespec, fromTimestamp( v.post_created ) ), true );
+}
+
+function uploadStream( filespec, v )
+{
+}
+
+window.onload = function ( )
+{
+//	document.title += " - " + SOURCE_FILENAME;
+	debug = DebugLog( 'debug.txt', 'header', 'status' );
+	debug.print_status( 'Process started for ' + SOURCE_FILENAME, true );
+
+	if( fs.FileExists( SOURCE_FILENAME ) ) {
+		let file = fs.OpenTextFile( SOURCE_FILENAME, FS_READ, false );
+		while( !file.AtEndOfStream ) {
+			let fields = file.ReadLine( ).split( /\t/ );
+			history.push( {
+				subreddit: fields[ 0 ],
+				stream_id: fields[ 1 ],
+				post_created: toTimestamp( fields[ 2 ] ),
+				post_title: fields[ 3 ],
+			} );
+		}
+		file.close( );
+	}
+	
+	let i = 0;
+	asyncLoop( function ( ) {
+		progress.reset( );
+		output1.remove( );
+		output2.remove( );
+		output3.remove( );
+		
+		if( i < history.length ) {
+			let v = history[ i ];
+			let filespec = getFilespec( v );
+			debug.print_header( sprintf( 'Processing %d of %d: "%s" (%s)',
+				i + 1, history.length, v.post_title, fromTimestamp( v.post_created ) ) );
+			asyncProcess( [
+				function ( ) { captureStream( filespec, v ); },
+				function ( ) { computeFileChecksum( filespec ); },
+				function ( ) { updateFileTimestamp( filespec, v ); },
+				function ( ) { uploadStream( filespec, v ); },
+			] );
+			i++;
+			return true;
+		}
+		
+		debug.clear_header( );
+		debug.print_status( 'Process stopped for ' + SOURCE_FILENAME, true );
+		alert( 'Process completed!' );
+		return false;
+	} )
+}
+</script>
+</head>
+
+<body style="margin: 0px; font-family: calibri; font-size: 12pt;">
+
+<table style="height: 100vh; width: 100vw;">
+<tr><th id="header" style="background-color: white; height: 25px;"></th></tr>
+<tr><td style="background-color: silver;">
+	<table width="100%">
+	<tr><td style="height: 20px; text-align: center;">
+		<div id="output1"><!-- <b>Destination:</b> %s --></div></td></tr>
+	<tr><td style="background-color: black;">
+		<div id="progress" style="width: 0%; background-color: cyan; height: 45px;"></div></td></tr>
+	<tr><td style="height: 20px; text-align:center;">
+		<div id="output2"><!-- %d%% Completed --></div></td></tr>
+	<tr><th style="height: 40px;">
+		<div id="output3"><!-- %d Total Fragments, %d Missing Fragments --></div></th></tr>
+	</table>
+</td></tr>
+<tr><td id="status"style="background-color: lightgrey; height: 25px; font-size: 10pt; font-family: lucida sans typewriter;"></td></tr>
+</table>
+
+<script>
+var progress = new ProgressBar( 'progress' );
+var output1 = new MarkupTemplate( 'output1' );
+var output2 = new MarkupTemplate( 'output2' );
+var output3 = new MarkupTemplate( 'output3' );
+</script>
+
+</body>
+</html>

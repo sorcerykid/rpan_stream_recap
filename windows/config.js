@@ -1,0 +1,7 @@
+YOUTUBE_DL = "bin\\youtube-dl.exe";
+SOURCE_FILENAME = "..\\history.txt";
+TARGET_FILENAME = "%SUBREDDIT%_%STREAM_ID%.mp4";
+TIMEZONE_OFFSET = -5;
+TARGET_PATH = "..";
+MAX_BITRATE = "5.0M";
+SLEEP_PERIOD = 30;
